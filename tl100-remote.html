@@ -1,0 +1,358 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>TL100 Remote</title>
+<style>
+  /* Same look as the native widget: dark glass, the lamp's own colour as the only accent. */
+  @property --glow { syntax: '<color>'; inherits: true; initial-value: transparent; }
+  :root { color-scheme: dark; font: 13px/1.35 system-ui; --lamp: #ffb84d; --day: #ffcc6b; transition: --glow .25s; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  body { margin: 0; min-height: 100vh; color: #fff; background: #17171b; }
+  body::before { /* the lamp's light spilling in from the top edge */
+    content: ""; position: fixed; inset: 0 0 auto; height: 230px; pointer-events: none; opacity: .6;
+    background: radial-gradient(ellipse 80% 100% at top, var(--glow), transparent 72%); }
+  main { position: relative; max-width: 360px; margin: 0 auto; padding: 14px; display: grid; gap: 12px; }
+
+  header { display: flex; align-items: center; gap: 10px; }
+  .orb { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--glow); box-shadow: 0 0 0 1px #ffffff24, 0 0 16px var(--glow); }
+  .title { flex: 1; min-width: 0; }
+  h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  p { margin: 0; font-size: 11px; color: #fff9; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  .pill { padding: 6px 14px; border-radius: 99px; background: #fff; color: #000; font-weight: 600; }
+  .pill:disabled { opacity: .4; cursor: default; }
+
+  fieldset { min-width: 0; margin: 0; padding: 12px; border: 0; border-radius: 16px; background: #ffffff12; display: grid; gap: 10px; transition: opacity .2s; }
+  fieldset[inert] { opacity: .4; }
+  #white { --tint: var(--day); }
+  #mood, #modes { --tint: var(--lamp); }
+  .head { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+  .head::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--tint); }
+
+  input[type=checkbox] { appearance: none; position: relative; margin: 0 0 0 auto; width: 38px; height: 22px; border-radius: 99px; background: #ffffff29; cursor: pointer; transition: background .2s; }
+  input[type=checkbox]::after { content: ""; position: absolute; inset: 2px auto 2px 2px; width: 18px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px #0003, 0 1px 2px #0006; transition: translate .2s; }
+  input[type=checkbox]:checked { background: var(--tint); }
+  input[type=checkbox]:checked::after { translate: 16px; }
+
+  .level { display: grid; grid-template-columns: 1fr 34px; align-items: center; gap: 8px; }
+  output { font-size: 11px; font-weight: 500; color: #fff9; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { appearance: none; display: block; width: 100%; height: 28px; margin: 0; border-radius: 99px; cursor: pointer;
+    /* the fill stops at the thumb's centre; the thumb, in the same colour, is its rounded end */
+    background: linear-gradient(to right, var(--tint) calc(14px + (100% - 28px) * var(--v, .5)), #ffffff1a 0); }
+  input[type=range]::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: 50%; background: var(--tint); box-shadow: inset 0 0 0 7px #0000001f; }
+
+  #pad { position: relative; height: 124px; border-radius: 12px; cursor: crosshair; touch-action: none;
+    background: linear-gradient(#fff0, #fff), linear-gradient(to right in hsl longer hue, #f00, #f00); }
+  #pad i { position: absolute; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; background: var(--lamp); box-shadow: 0 1px 4px #0007;
+    left: calc((100% - 22px) * var(--h, 0)); top: calc((100% - 22px) * (1 - var(--s, 1))); }
+
+  .chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-right: 24px; mask-image: linear-gradient(to right, #000 86%, #0000); }
+  .chips button { flex: none; padding: 5px 10px; border-radius: 99px; background: #ffffff1a; color: #ffffffd9; font-size: 11.5px; font-weight: 500; }
+  .chips button[aria-pressed=true] { background: #fff; color: #000; }
+
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .modes button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 10px; border-radius: 12px; background: #ffffff1a; font-weight: 600; white-space: nowrap; transition: background .2s, color .2s; }
+  .modes button[aria-pressed=true] { background: var(--tint); color: #000; }
+  .modes svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #hint:empty { display: none; }
+  #cam { display: block; width: 100%; border-radius: 12px; transform: scaleX(-1); outline-offset: -4px; }
+</style>
+
+<main>
+  <header>
+    <i class="orb"></i>
+    <div class="title">
+      <h1>TL100 Remote</h1>
+      <p id="status" role="status">Not connected</p>
+    </div>
+    <button id="connect" class="pill">Connect</button>
+  </header>
+
+  <fieldset id="white" inert>
+    <label class="head">White light <input type="checkbox" role="switch" id="wOn"></label>
+    <div class="level"><input type="range" id="wBri" min="1" max="100" aria-label="White brightness"><output for="wBri"></output></div>
+  </fieldset>
+
+  <fieldset id="mood" inert>
+    <label class="head">Mood light <input type="checkbox" role="switch" id="cOn"></label>
+    <div id="pad" tabindex="0" role="group" aria-label="Colour. Arrow keys change hue and saturation."><i></i></div>
+    <div class="level"><input type="range" id="cBri" min="1" max="100" aria-label="Mood brightness"><output for="cBri"></output></div>
+    <div id="fx" class="chips" role="group" aria-label="Effect"></div>
+  </fieldset>
+
+  <fieldset id="modes" inert>
+    <div class="modes">
+      <button id="music" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Music mode</button>
+      <button id="hands" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>Hand mode</button>
+    </div>
+    <p id="hint"></p>
+    <video id="cam" hidden muted playsinline></video>
+  </fieldset>
+</main>
+
+<script>
+// Protocol of lamps driven by the Beurer LightUp app (TL100; WL90/WL100 reportedly the same),
+// from https://github.com/Deadolus/ha-beurer
+const SVC    = '14839ac4-7d7e-415c-9a42-167340cf2339';
+const WRITE  = '8b00ace7-eb0b-49b0-bbe9-9aee0a26e1a3';
+const NOTIFY = '0734594a-a8e7-4b1a-a6b1-cd5243059a57';
+const GAP_MS = 150;      // ponytail: fixed pause between ordinary packets; raise it if the lamp ignores commands
+const LIVE_GAP_MS = 150; // pause between packets while dragging or gesturing, in line with the reference driver's 100-200 ms
+const EFFECTS = ['Solid', 'Random', 'Rainbow', 'Rainbow Slow', 'Fusion', 'Pulse', 'Wave', 'Chill', 'Action', 'Forest', 'Summer'];
+
+const $ = id => document.getElementById(id);
+const [wOn, wBri, cOn, cBri, pad, fx, video] = ['wOn', 'wBri', 'cOn', 'cBri', 'pad', 'fx', 'cam'].map($);
+const root = document.documentElement.style;
+const hex = a => [...a].map(b => b.toString(16).padStart(2, '0')).join('');
+const clamp = v => Math.min(1, Math.max(0, v));
+const say = msg => $('status').textContent = msg;
+const hint = msg => $('hint').textContent = msg;
+
+const pkt = p => Uint8Array.of(0xFE, 0xEF, 0x0A, p.length + 7, 0xAB, 0xAA, p.length + 2,
+  ...p, p.reduce((a, b) => a ^ b, p.length + 2), 0x55, 0x0D, 0x0A);
+// hue in degrees, value and saturation 0..1 -> [r, g, b]
+const hsv = (h, v, s = 1) => [5, 3, 1].map(n => { const k = (n + h / 60) % 6; return Math.round(255 * v * (1 - s * Math.max(0, Math.min(k, 4 - k, 1)))); });
+const toHueSat = ([r, g, b]) => {
+  const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+  const h = !d ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [Math.round(h * 60), max ? d / max : 0];
+};
+// self-check: packets captured from the real app, and the colour maths
+console.assert(hex(pkt([0x37, 1])) === 'feef0a09abaa04370132550d0a'
+  && hex(pkt([0x32, 255, 0, 0])) === 'feef0a0babaa0632ff0000cb550d0a', 'packet framing broken');
+console.assert(hsv(0, 1) + '' === '255,0,0' && hsv(120, 1) + '' === '0,255,0' && hsv(240, .5) + '' === '0,0,128'
+  && hsv(0, 1, 0) + '' === '255,255,255' && toHueSat(hsv(277, 1, .6)) + '' === '277,0.6', 'colour maths broken');
+
+// ---- State: what the mood light shows. Everything visual derives from it in paint(). ----
+let hue = 30, sat = 1, effect = 0;
+let dev, tx, audio, cam, padDown = false, liveBusy = false, queue = Promise.resolve();
+
+function paint() {
+  const lamp = `rgb(${hsv(hue, 1, sat)})`;
+  root.setProperty('--lamp', lamp);
+  root.setProperty('--h', hue / 360);
+  root.setProperty('--s', sat);
+  if (!audio) root.setProperty('--glow', cOn.checked ? lamp : wOn.checked ? '#ffcc6b' : 'transparent'); // music mode drives the glow itself
+  for (const r of [wBri, cBri]) { r.style.setProperty('--v', r.value / 100); r.nextElementSibling.textContent = r.value + '%'; }
+  [...fx.children].forEach((b, i) => b.setAttribute('aria-pressed', i === effect));
+}
+
+// ---- Talking to the lamp ----
+// Web Bluetooth rejects overlapping writes, so everything goes through one queue.
+const write = (p, gap) => queue = queue.then(async () => {
+  await tx[tx.properties.writeWithoutResponse ? 'writeValueWithoutResponse' : 'writeValueWithResponse'](pkt(p));
+  if (gap) await new Promise(r => setTimeout(r, gap));
+}).catch(e => say(e.message));
+const send = (...p) => write(p, GAP_MS);
+// For continuous input (drags, gestures, beats): send the newest state, drop frames while one is in flight.
+function live(gap, ...packets) {
+  if (liveBusy || !dev?.gatt.connected) return;
+  liveBusy = true;
+  packets.forEach(p => write(p, gap));
+  queue.then(() => liveBusy = false);
+}
+const sync = () => { send(0x30, 1); send(0x30, 2); }; // ask the lamp for its white + mood state
+// The lamp runs one light at a time, and locks up (dark, deaf until a button on it is pressed) if it gets a
+// brightness or colour for the light that is off. So switching one on must untick the other straight away.
+const other = box => box === wOn ? cOn : wOn;
+const ensureOn = (box, mode) => { if (!box.checked) { box.checked = true; other(box).checked = false; send(0x37, mode); } };
+const colorPacket = () => [0x32, ...hsv(hue, 1, sat)];
+
+function onStatus(e) {
+  const v = e.target.value, r = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  // don't let a late reply fight whatever the user is doing right now
+  if (r.length < 11 || padDown || audio || cam || document.querySelector('input:active')) return;
+  if (r[8] === 1) {
+    wOn.checked = r[9] === 1;
+    if (r[10]) wBri.value = r[10];
+  } else if (r[8] === 2 && r.length >= 17) {
+    cOn.checked = r[9] === 1;
+    if (r[10]) cBri.value = r[10];
+    if (Math.max(r[13], r[14], r[15])) [hue, sat] = toHueSat(r.slice(13, 16));
+    if (cOn.checked) effect = Math.min(r[16], EFFECTS.length - 1);
+  } else if (r[8] === 255) {
+    wOn.checked = cOn.checked = false;
+  }
+  paint();
+}
+
+function enable(on) {
+  for (const id of ['white', 'mood', 'modes']) $(id).inert = !on;
+  $('connect').hidden = on;
+}
+
+$('connect').onclick = async () => {
+  try {
+    dev ??= await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+    dev.ongattserverdisconnected = () => { enable(false); say('Disconnected'); $('connect').textContent = 'Reconnect'; };
+    say('Connecting…');
+    const svc = await (await dev.gatt.connect()).getPrimaryService(SVC);
+    tx = await svc.getCharacteristic(WRITE);
+    try {
+      const rx = await svc.getCharacteristic(NOTIFY);
+      rx.oncharacteristicvaluechanged = onStatus;
+      await rx.startNotifications();
+    } catch { /* controls still work, they just won't mirror the lamp's state */ }
+    enable(true);
+    say(dev.name || 'Connected');
+    sync();
+  } catch (e) {
+    dev = null; // let the next click pick a different device
+    say(e.message);
+  }
+};
+
+// ---- Controls ----
+wOn.onchange  = () => { if (wOn.checked) cOn.checked = false; send(wOn.checked ? 0x37 : 0x35, 1); sync(); paint(); };
+wBri.oninput  = () => { ensureOn(wOn, 1); live(LIVE_GAP_MS, [0x31, 1, +wBri.value]); paint(); };
+wBri.onchange = () => { send(0x31, 1, +wBri.value); sync(); };
+cOn.onchange  = () => {
+  if (cOn.checked) wOn.checked = false;
+  send(cOn.checked ? 0x37 : 0x35, 2);
+  if (cOn.checked) { send(0x34, effect); if (!effect) send(...colorPacket()); } // the lamp wakes in rainbow mode; put back what's shown
+  sync(); paint();
+};
+cBri.oninput  = () => { ensureOn(cOn, 2); live(LIVE_GAP_MS, [0x31, 2, +cBri.value]); paint(); };
+cBri.onchange = () => { send(0x31, 2, +cBri.value); sync(); };
+
+function setColor(h, s, final) {
+  const hadEffect = effect; // a running effect hides the colour, so switch it off first
+  hue = h; sat = s; effect = 0;
+  ensureOn(cOn, 2);
+  paint();
+  if (final) { send(0x34, 0); send(...colorPacket()); sync(); }
+  else live(LIVE_GAP_MS, ...(hadEffect ? [[0x34, 0]] : []), colorPacket());
+}
+const padPoint = e => {
+  const r = pad.getBoundingClientRect(), along = (at, start, size) => clamp((at - start - 11) / (size - 22)); // 11 = knob radius
+  setColor(Math.round(359 * along(e.clientX, r.left, r.width)), 1 - along(e.clientY, r.top, r.height));
+};
+pad.onpointerdown = e => { padDown = true; pad.setPointerCapture(e.pointerId); padPoint(e); };
+pad.onpointermove = e => padDown && padPoint(e);
+pad.onpointerup = () => { padDown = false; setColor(hue, sat, true); };
+pad.onkeydown = e => {
+  const step = { ArrowLeft: [-5, 0], ArrowRight: [5, 0], ArrowUp: [0, .05], ArrowDown: [0, -.05] }[e.key];
+  if (step) { e.preventDefault(); setColor((hue + step[0] + 360) % 360, clamp(sat + step[1]), true); }
+};
+
+EFFECTS.forEach((name, i) => {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => { effect = i; ensureOn(cOn, 2); send(0x34, i); if (!i) send(...colorPacket()); sync(); paint(); };
+  fx.append(b);
+});
+
+// ---- Music mode: bass loudness drives brightness, beats push the hue around ----
+const BASS_HZ = 150;    // only sound below this drives the light
+const FRAME   = 4096;   // audio samples per lamp update (~85 ms, ~12 updates/s). 2048 = snappier, if the lamp keeps up
+const FLOOR   = 0.04;   // brightness between beats (0..1), so the lamp never goes fully dark
+
+let peak = 1e-4, beatHue = 0;
+function beatColor(samples) { // one frame of bass-filtered audio -> [r, g, b]
+  const rms = Math.hypot(...samples) / Math.sqrt(samples.length);
+  peak = Math.max(rms, peak * 0.995, 1e-4);      // auto-gain: follows the track's loudness, so volume doesn't matter
+  const punch = (rms / peak) ** 2;               // squared, so beats stand out from the bed
+  beatHue = (beatHue + 1 + 25 * punch) % 360;
+  return hsv(beatHue, FLOOR + (1 - FLOOR) * punch);
+}
+
+function stopMusic() {
+  if (!audio) return;
+  audio.stream.getTracks().forEach(t => t.stop());
+  audio.ctx.close();
+  audio = null;
+  $('music').setAttribute('aria-pressed', false);
+  hint('');
+  if (dev?.gatt.connected) { send(...colorPacket()); sync(); } // back to the colour the page shows
+  paint();
+}
+$('music').onclick = async () => {
+  if (audio) return stopMusic();
+  stopHands();
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true, systemAudio: 'include' });
+    stream.getVideoTracks().forEach(t => t.stop()); // Chrome insists on video; we only want the sound
+    const [track] = stream.getAudioTracks();
+    if (!track) return hint('No audio in that share. Pick Entire Screen or a tab and tick the audio box.');
+    track.onended = stopMusic;
+    const ctx = new AudioContext();
+    const bass = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: BASS_HZ });
+    // ponytail: deprecated ScriptProcessor used as the clock, because audio callbacks keep firing in a
+    // background tab where timers drop to 1/s. Move to AudioWorklet if Chrome ever removes it.
+    const tick = ctx.createScriptProcessor(FRAME, 1, 1);
+    ctx.createMediaStreamSource(stream).connect(bass).connect(tick).connect(ctx.destination); // tick outputs silence
+    let frame = 0;
+    tick.onaudioprocess = e => {
+      const rgb = beatColor(e.inputBuffer.getChannelData(0));
+      root.setProperty('--glow', `rgb(${rgb})`); // the page pulses along
+      // every 2nd frame (~170 ms), to stay near the pace the reference driver uses. Gap 0: no timers, see above
+      if (++frame % 2 === 0) live(0, [0x32, ...rgb]);
+    };
+    audio = { ctx, stream };
+    ensureOn(cOn, 2); send(0x34, 0); // mood light on, built-in effect off; its brightness slider caps the show
+    effect = 0;
+    $('music').setAttribute('aria-pressed', true);
+    hint('Pulsing to your Mac’s sound. The mood brightness slider caps the flashes.');
+    paint();
+  } catch (e) { hint(e.message); }
+};
+
+// ---- Hand mode: pinch thumb + index to "grab", then move: sideways = colour, up/down = brightness ----
+const VISION = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0';
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const PINCH = 0.35;      // thumb-to-index gap, as a fraction of palm length, that counts as a pinch. Raise if grabs don't register
+const EDGE = 0.15;       // dead margin at each edge of the camera frame, so full range is reachable without leaving view
+
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const span = v => clamp((v - EDGE) / (1 - 2 * EDGE));
+function handToLight(lm) { // 21 hand landmarks -> { hue, pct } while pinching, else null
+  if (!lm || dist(lm[4], lm[8]) > PINCH * dist(lm[0], lm[9])) return null; // 4/8 = thumb/index tips, 0-9 = palm
+  const x = (lm[4].x + lm[8].x) / 2, y = (lm[4].y + lm[8].y) / 2;
+  return { hue: Math.round(359 * span(1 - x)), pct: Math.max(1, Math.round(100 * span(1 - y))) }; // 1-x: mirrored view
+}
+
+function stopHands() {
+  if (!cam) return;
+  cam.getTracks().forEach(t => t.stop());
+  cam = null;
+  video.hidden = true;
+  $('hands').setAttribute('aria-pressed', false);
+  hint('');
+  if (dev?.gatt.connected) sync();
+}
+$('hands').onclick = async () => {
+  if (cam) return stopHands();
+  stopMusic();
+  try {
+    hint('Loading hand tracking…');
+    const { HandLandmarker, FilesetResolver } = await import(VISION + '/vision_bundle.mjs');
+    const tracker = await HandLandmarker.createFromOptions(await FilesetResolver.forVisionTasks(VISION + '/wasm'),
+      { baseOptions: { modelAssetPath: HAND_MODEL }, runningMode: 'VIDEO', numHands: 1 });
+    cam = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = cam;
+    video.hidden = false;
+    await video.play();
+    ensureOn(cOn, 2); send(0x34, 0); // mood light on, built-in effect off
+    effect = 0;
+    $('hands').setAttribute('aria-pressed', true);
+    hint('Pinch, then move: sideways for colour, up and down for brightness.');
+    paint();
+    const loop = () => { // ponytail: rAF pauses when the tab is hidden; fine, you watch the preview while gesturing
+      if (!cam) return;
+      requestAnimationFrame(loop);
+      const grab = handToLight(tracker.detectForVideo(video, performance.now()).landmarks[0]);
+      video.style.outline = grab ? '4px solid var(--lamp)' : ''; // shows the grab and its colour
+      if (!grab) return;
+      hue = grab.hue; sat = 1; cBri.value = grab.pct;
+      paint();
+      live(LIVE_GAP_MS, colorPacket(), [0x31, 2, grab.pct]);
+    };
+    loop();
+  } catch (e) { stopHands(); hint(e.message); }
+};
+
+paint();
+if (!navigator.bluetooth) { $('connect').disabled = true; say('This browser has no Web Bluetooth. Open the page in Chrome.'); }
+</script>
